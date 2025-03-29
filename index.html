@@ -6,12 +6,12 @@
   <style>
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
-    /* Overlay for puzzle mode */
+    /* Puzzle overlay styling */
     #overlay {
       position: absolute;
       top: 0; left: 0;
       width: 100%; height: 100%;
-      background: rgba(0, 0, 0, 0.8);
+      background: rgba(0,0,0,0.8);
       color: #fff;
       display: none;
       flex-direction: column;
@@ -33,6 +33,7 @@
   </style>
 </head>
 <body>
+  <!-- Puzzle overlay -->
   <div id="overlay">
     <div id="questionContainer">
       <div id="questionText" style="font-size: 32px; margin-bottom: 20px;"></div>
@@ -42,192 +43,178 @@
     </div>
     <div id="message" style="font-size: 36px; margin-top: 20px;"></div>
   </div>
+
   <!-- Load Three.js and PointerLockControls from CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r136/three.min.js"></script>
   <script src="https://threejs.org/examples/js/controls/PointerLockControls.js"></script>
   <script>
-    // === Global Variables ===
+    // Global variables
     let scene, camera, renderer, controls;
     let clock = new THREE.Clock();
-    let objects = [];  // Bookshelves and obstacles
+    let objects = [];  // Bookshelf obstacles
     let zombies = [];  // Array of zombie meshes
-    let terminal;      // The terminal block
+    let terminal;      // Terminal block
     let gameState = 'play'; // 'play', 'puzzle', 'gameover', 'win'
+    let overlay = document.getElementById("overlay");
+    
+    // Puzzle data (for the flat-screen puzzle overlay)
     let puzzleData = {
       questions: [],
       current: 0,
       startTime: 0,
-      timeLimit: 60 // seconds
+      timeLimit: 60 // seconds per question
     };
 
-    // === Initialize Scene ===
     init();
     animate();
 
     function init() {
-      // Create scene and camera
+      // Scene and camera setup
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0xaaaaaa);
-      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 2000);
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 1, 2000);
       camera.position.set(0, 20, 0); // Eye height
-      
-      // Create renderer
+
+      // Renderer setup
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setSize(window.innerWidth, window.innerHeight);
       document.body.appendChild(renderer.domElement);
-      
+
       // Lights
       let ambient = new THREE.AmbientLight(0xffffff, 0.6);
       scene.add(ambient);
       let directional = new THREE.DirectionalLight(0xffffff, 0.8);
       directional.position.set(100, 200, 50);
       scene.add(directional);
-      
+
+      // Floor
+      let floorGeom = new THREE.PlaneGeometry(1000, 1000);
+      let floorMat = new THREE.MeshPhongMaterial({ color: 0x808080 });
+      let floor = new THREE.Mesh(floorGeom, floorMat);
+      floor.rotation.x = -Math.PI/2;
+      scene.add(floor);
+
+      // Hard border (wireframe box) around gameplay area
+      let borderGeom = new THREE.BoxGeometry(500, 50, 500);
+      let borderMat = new THREE.MeshBasicMaterial({ color: 0x000000, wireframe: true });
+      let border = new THREE.Mesh(borderGeom, borderMat);
+      border.position.y = 25;
+      scene.add(border);
+
+      // Bookshelves: generate many obstacles with varying sizes
+      for (let i = 0; i < 50; i++) {
+        let w = THREE.MathUtils.randFloat(20, 50);
+        let h = THREE.MathUtils.randFloat(50, 150);
+        let d = THREE.MathUtils.randFloat(10, 30);
+        let shelfGeom = new THREE.BoxGeometry(w, h, d);
+        let shelfMat = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
+        let shelf = new THREE.Mesh(shelfGeom, shelfMat);
+        shelf.position.x = THREE.MathUtils.randFloatSpread(400);
+        shelf.position.z = THREE.MathUtils.randFloatSpread(400);
+        shelf.position.y = h / 2;
+        scene.add(shelf);
+        objects.push(shelf);
+      }
+
+      // Terminal: a green cube that is the goal
+      let termGeom = new THREE.BoxGeometry(50, 50, 50);
+      let termMat = new THREE.MeshPhongMaterial({ color: 0x00ff00 });
+      terminal = new THREE.Mesh(termGeom, termMat);
+      terminal.position.set(200, 25, -200);
+      scene.add(terminal);
+
+      // Zombies: simple red boxes that chase the player
+      for (let i = 0; i < 10; i++) {
+        let zombGeom = new THREE.BoxGeometry(30, 60, 30);
+        let zombMat = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+        let zomb = new THREE.Mesh(zombGeom, zombMat);
+        zomb.position.x = THREE.MathUtils.randFloatSpread(400);
+        zomb.position.z = THREE.MathUtils.randFloatSpread(400);
+        zomb.position.y = 30;
+        scene.add(zomb);
+        zombies.push(zomb);
+      }
+
+      // Player arms/hands: simple geometry attached to camera
+      let arms = new THREE.Group();
+      let leftArm = new THREE.Mesh(new THREE.BoxGeometry(10, 30, 10), new THREE.MeshPhongMaterial({ color: 0xdddddd }));
+      leftArm.position.set(-20, -10, -30);
+      arms.add(leftArm);
+      let rightArm = new THREE.Mesh(new THREE.BoxGeometry(10, 30, 10), new THREE.MeshPhongMaterial({ color: 0xdddddd }));
+      rightArm.position.set(20, -10, -30);
+      arms.add(rightArm);
+      // Book in right hand
+      let book = new THREE.Mesh(new THREE.BoxGeometry(15, 5, 20), new THREE.MeshPhongMaterial({ color: 0x0000ff }));
+      book.position.set(20, -10, -40);
+      arms.add(book);
+      camera.add(arms);
+
       // Set up PointerLockControls for first-person view
       controls = new THREE.PointerLockControls(camera, renderer.domElement);
       scene.add(controls.getObject());
       document.addEventListener('click', () => {
         if (gameState === 'play') controls.lock();
       });
-      
-      // Floor
-      let floorGeom = new THREE.PlaneGeometry(1000, 1000);
-      let floorMat = new THREE.MeshPhongMaterial({ color: 0x808080 });
-      let floor = new THREE.Mesh(floorGeom, floorMat);
-      floor.rotation.x = -Math.PI / 2;
-      scene.add(floor);
-      
-      // Hard border around gameplay area (wireframe box)
-      let borderGeom = new THREE.BoxGeometry(500, 50, 500);
-      let borderMat = new THREE.MeshBasicMaterial({ color: 0x000000, wireframe: true });
-      let border = new THREE.Mesh(borderGeom, borderMat);
-      border.position.y = 25;
-      scene.add(border);
-      
-      // Bookshelves: Create many random boxes as bookshelves
-      for (let i = 0; i < 30; i++) {
-        let width = THREE.MathUtils.randFloat(20, 50);
-        let height = THREE.MathUtils.randFloat(50, 150);
-        let depth = THREE.MathUtils.randFloat(10, 30);
-        let shelfGeom = new THREE.BoxGeometry(width, height, depth);
-        let shelfMat = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
-        let shelf = new THREE.Mesh(shelfGeom, shelfMat);
-        shelf.position.x = THREE.MathUtils.randFloatSpread(400);
-        shelf.position.z = THREE.MathUtils.randFloatSpread(400);
-        shelf.position.y = height / 2;
-        scene.add(shelf);
-        objects.push(shelf);
-      }
-      
-      // Terminal: 3D block goal (green cube)
-      let termGeom = new THREE.BoxGeometry(50, 50, 50);
-      let termMat = new THREE.MeshPhongMaterial({ color: 0x00ff00 });
-      terminal = new THREE.Mesh(termGeom, termMat);
-      terminal.position.set(200, 25, -200);
-      scene.add(terminal);
-      
-      // Zombies: Simple red boxes (humanoid shape) that chase the player.
-      for (let i = 0; i < 5; i++) {
-        let zombieGeom = new THREE.BoxGeometry(30, 60, 30);
-        let zombieMat = new THREE.MeshPhongMaterial({ color: 0xff0000 });
-        let zombie = new THREE.Mesh(zombieGeom, zombieMat);
-        zombie.position.x = THREE.MathUtils.randFloatSpread(400);
-        zombie.position.z = THREE.MathUtils.randFloatSpread(400);
-        zombie.position.y = 30;
-        scene.add(zombie);
-        zombies.push(zombie);
-      }
-      
-      // Player arms/hands: Attach simple geometry to the camera.
-      let arms = new THREE.Group();
-      // Left arm
-      let leftArmGeom = new THREE.BoxGeometry(10, 30, 10);
-      let leftArmMat = new THREE.MeshPhongMaterial({ color: 0xdddddd });
-      let leftArm = new THREE.Mesh(leftArmGeom, leftArmMat);
-      leftArm.position.set(-20, -10, -30);
-      arms.add(leftArm);
-      // Right arm
-      let rightArmGeom = new THREE.BoxGeometry(10, 30, 10);
-      let rightArmMat = new THREE.MeshPhongMaterial({ color: 0xdddddd });
-      let rightArm = new THREE.Mesh(rightArmGeom, rightArmMat);
-      rightArm.position.set(20, -10, -30);
-      arms.add(rightArm);
-      // Book in right hand
-      let bookGeom = new THREE.BoxGeometry(15, 5, 20);
-      let bookMat = new THREE.MeshPhongMaterial({ color: 0x0000ff });
-      let book = new THREE.Mesh(bookGeom, bookMat);
-      book.position.set(20, -10, -40);
-      arms.add(book);
-      camera.add(arms);
-      
-      // Setup window resize
+
+      // Handle window resize
       window.addEventListener('resize', onWindowResize, false);
-      
-      // Setup puzzle overlay (hidden initially)
+
+      // Setup puzzle overlay (initially hidden)
       setupOverlay();
     }
-    
+
     function onWindowResize() {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
     }
-    
+
     // === Animation Loop ===
     function animate() {
       requestAnimationFrame(animate);
       let delta = clock.getDelta();
-      
+
       if (gameState === 'play') {
-        updatePlayer();
         updateZombies(delta);
         checkCollisions();
       } else if (gameState === 'puzzle') {
         updatePuzzleTimer();
       }
-      
+
       renderer.render(scene, camera);
     }
-    
+
     // === Update Functions ===
-    function updatePlayer() {
-      // First, check if there's any touch/pointer input
-      if (renderer.domElement.pointerLockElement === renderer.domElement) {
-        // PointerLockControls already updates the camera with mouse movement.
-        // For movement, we listen for key presses.
-        // (You might add WASD movement here if desired.)
-      }
-    }
-    
     function updateZombies(delta) {
-      zombies.forEach(zombie => {
+      zombies.forEach(zomb => {
         let direction = new THREE.Vector3();
-        direction.subVectors(controls.getObject().position, zombie.position);
+        // Get player's position from controls
+        direction.subVectors(controls.getObject().position, zomb.position);
         direction.normalize();
-        zombie.position.addScaledVector(direction, delta * 50); // Zombie speed
+        zomb.position.addScaledVector(direction, delta * 50); // zombie speed
       });
     }
-    
+
     function checkCollisions() {
       let playerPos = controls.getObject().position;
-      // If close to terminal, enter puzzle mode.
+      // Check if near terminal (goal)
       if (playerPos.distanceTo(terminal.position) < 30) {
         enterPuzzleMode();
       }
-      // If any zombie is too close, game over.
-      zombies.forEach(zombie => {
-        if (playerPos.distanceTo(zombie.position) < 20) {
+      // Check if any zombie is too close
+      zombies.forEach(zomb => {
+        if (playerPos.distanceTo(zomb.position) < 20) {
           gameOver();
         }
       });
     }
-    
+
     function gameOver() {
       gameState = 'gameover';
       showOverlay("Game Over! Press Y to Restart, N to Quit.");
       document.addEventListener('keydown', handleGameOverInput);
     }
-    
+
     function handleGameOverInput(e) {
       if (e.key.toLowerCase() === 'y') {
         location.reload();
@@ -235,17 +222,16 @@
         showOverlay("Thanks for playing!");
       }
     }
-    
+
     function enterPuzzleMode() {
       if (gameState !== 'play') return;
       gameState = 'puzzle';
       controls.unlock();
       startPuzzle();
     }
-    
+
     // === Puzzle Overlay Functions ===
     function setupOverlay() {
-      let overlay = document.getElementById("overlay");
       overlay.style.display = "none";
       document.getElementById("submitAnswer").addEventListener("click", submitAnswer);
       document.getElementById("answerInput").addEventListener("keydown", function(e) {
@@ -254,7 +240,7 @@
         }
       });
     }
-    
+
     function startPuzzle() {
       // Generate 3 questions
       puzzleData.questions = [];
@@ -265,7 +251,7 @@
       puzzleData.startTime = Date.now();
       showPuzzleQuestion();
     }
-    
+
     function generatePuzzleQuestion() {
       let types = ['multiplication', 'sorting', 'word', 'prealgebra'];
       let type = types[Math.floor(Math.random() * types.length)];
@@ -301,15 +287,14 @@
         return { text: `Solve for x: ${a}(x + ${b}) = ${c}`, answer: xVal.toString() };
       }
     }
-    
+
     function showPuzzleQuestion() {
-      let overlay = document.getElementById("overlay");
       overlay.style.display = "flex";
       document.getElementById("questionText").innerText = puzzleData.questions[puzzleData.current].text;
       document.getElementById("answerInput").value = "";
       updatePuzzleTimer();
     }
-    
+
     function submitAnswer() {
       let input = document.getElementById("answerInput").value.trim();
       if (input === puzzleData.questions[puzzleData.current].answer) {
@@ -318,23 +303,22 @@
           puzzleData.startTime = Date.now();
           showPuzzleQuestion();
         } else {
-          // Puzzle solved, resume game
-          document.getElementById("overlay").style.display = "none";
+          // Puzzle solved: resume game
+          overlay.style.display = "none";
           gameState = 'play';
           controls.lock();
         }
       } else {
-        // Wrong answer: game over
         showOverlay("Wrong answer! Game Over. Press Y to Restart, N to Quit.");
         gameState = 'gameover';
         document.addEventListener('keydown', handleGameOverInput);
       }
     }
-    
+
     function updatePuzzleTimer() {
       let overlayTimer = document.getElementById("timerText");
-      let elapsed = Math.floor((Date.now() - puzzleData.startTime) / 1000);
-      let remaining = Math.max(0, puzzleData.timeLimit - elapsed);
+      let elapsed = Math.floor((Date.now() - puzzleData.startTime));
+      let remaining = Math.max(0, puzzleData.timeLimit - Math.floor(elapsed/1000));
       overlayTimer.innerText = `Time remaining: ${remaining} sec`;
       if (remaining <= 0) {
         showOverlay("Time's up! Game Over. Press Y to Restart, N to Quit.");
@@ -342,16 +326,13 @@
         document.addEventListener('keydown', handleGameOverInput);
       }
     }
-    
-    function updatePuzzle() {
-      // Puzzle overlay updates via DOM events.
-    }
-    
+
     function showOverlay(message) {
-      let overlay = document.getElementById("overlay");
       overlay.style.display = "flex";
       document.getElementById("message").innerText = message;
     }
+
+    // End of script.
   </script>
 </body>
 </html>
